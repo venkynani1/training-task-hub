@@ -75,11 +75,10 @@ export default function TrainingDetail({ params }: { params: Promise<{ id: strin
       emp_id: String(r.emp_id ?? "").trim(), name: String(r.name ?? "").trim(), email: String(r.email ?? "").trim(),
     })).filter((r) => r.name);
     if (!clean.length) { alert("No names found. The sheet needs a Name column (Emp ID and Email are optional)."); return; }
-    const existing = new Set(t?.participants.map((p) => (p.emp_id || p.name).toLowerCase()));
-    const fresh = clean.filter((r) => !existing.has((r.emp_id || r.name).toLowerCase()));
-    if (!fresh.length) { flash("Everyone's already on the list"); return; }
-    await api(`/api/trainings/${id}/participants`, "POST", { rows: fresh });
-    flash(`Added ${fresh.length} participant${fresh.length > 1 ? "s" : ""}`);
+    const r = await api<{ count: number; skipped: number }>(`/api/trainings/${id}/participants`, "POST", { rows: clean });
+    flash(r.count
+      ? `Added ${r.count} participant${r.count > 1 ? "s" : ""}${r.skipped ? ` · ${r.skipped} already on the list` : ""}`
+      : "Everyone's already on the list");
     setAddOpen(false); setPasteList(""); load();
   }
 

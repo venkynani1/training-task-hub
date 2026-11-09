@@ -15,6 +15,12 @@ export function applyCategoryRules<T extends Record<string, any>>(r: T): T & { c
   return category === "Masterclass" ? { ...r, category, ...MASTERCLASS_TIME } : { ...r, category };
 }
 
+/** Identity of a training for duplicate checks: name (case/spacing ignored) + section + start date. */
+export function trainingKey(name: unknown, category: unknown, start: unknown): string {
+  const n = String(name ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  return `${n}|${normCategory(category)}|${String(start ?? "").slice(0, 10)}`;
+}
+
 export const STATUSES = ["Scheduled", "Ongoing", "Completed", "On Hold", "Cancelled"] as const;
 export const OVERRIDES = ["", "On Hold", "Cancelled"] as const;
 

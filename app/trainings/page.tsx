@@ -4,7 +4,7 @@ import Link from "next/link";
 import {
   api, mapRows, readSpreadsheet, toISODate, toTime, TRAINING_COLUMNS, downloadCSV, statusClass, fmtDate,
 } from "@/lib/client";
-import { trainingStatus, applyCategoryRules, MASTERCLASS_TIME } from "@/lib/status";
+import { trainingStatus, applyCategoryRules, MASTERCLASS_TIME, trainingKey } from "@/lib/status";
 
 type Training = {
   id: number; name: string; category: string; trainer: string; requested_by: string; mode: string; location: string;
@@ -110,8 +110,11 @@ export default function TrackerPage() {
     if (!preview) return;
     setImporting(true);
     try {
-      const r = await api<{ count: number }>("/api/trainings", "POST", { rows: preview });
-      setPreview(null); flash(`Imported ${r.count} trainings`); load();
+      const r = await api<{ added: number; updated: number; skipped: number }>("/api/trainings", "POST", { rows: preview });
+      setPreview(null);
+      flash([`${r.added} added`, r.updated && `${r.updated} already there (updated)`, r.skipped && `${r.skipped} repeated in sheet`]
+        .filter(Boolean).join(" · "));
+      load();
     } catch (e) { alert((e as Error).message); } finally { setImporting(false); }
   }
 
@@ -124,6 +127,18 @@ export default function TrackerPage() {
     ]);
   }
 
+  const existingKeys = new Set(rows.filter((r) => r.start_date).map((r) => trainingKey(r.name, r.category, r.start_date)));
+  const previewTag: ("new" | "update" | "repeat")[] = [];
+  {
+    const seenKeys = new Set<string>();
+    for (const r of preview || []) {
+      const k = trainingKey(r.name, r.category, r.start_date);
+      previewTag.push(seenKeys.has(k) ? "repeat" : existingKeys.has(k) ? "update" : "new");
+      seenKeys.add(k);
+    }
+  }
+  const previewCounts = { new: 0, update: 0, repeat: 0 };
+  previewTag.forEach((t) => previewCounts[t]++);
   const inSection = rows.filter((r) => section === "All" || r.category === section);
   const counts = Object.fromEntries(FILTERS.map((f) => [f, f === "All" ? inSection.length : inSection.filter((r) => r.status === f).length]));
   const shown = inSection.filter((r) =>
@@ -248,16 +263,24 @@ export default function TrackerPage() {
         <div className="backdrop" onClick={(e) => e.target === e.currentTarget && setPreview(null)}>
           <div className="modal stack" style={{ maxWidth: 900 }}>
             <div className="modal-head">
-              <h2 style={{ margin: 0 }}>Import {preview.length} trainings?</h2>
+              <h2 style={{ margin: 0 }}>
+                {previewCounts.new} new{previewCounts.update ? `, ${previewCounts.update} already in tracker` : ""}
+                {previewCounts.repeat ? `, ${previewCounts.repeat} repeated` : ""}
+              </h2>
               <span className="small muted">Rows without a Section column go to {newCategory}.</span>
               <button className="btn ghost" onClick={() => setPreview(null)}>✕</button>
             </div>
             <div className="sheet-wrap" style={{ maxHeight: 360 }}>
               <table className="sheet">
-                <thead><tr><th>Training</th><th>Section</th><th>Trainer</th><th>Start</th><th>End</th><th>Time</th><th>Status</th></tr></thead>
+                <thead><tr><th></th><th>Training</th><th>Section</th><th>Trainer</th><th>Start</th><th>End</th><th>Time</th><th>Status</th></tr></thead>
                 <tbody>
                   {preview.map((r, i) => (
-                    <tr key={i}>
+                    <tr key={i} style={previewTag[i] === "new" ? undefined : { opacity: .6 }}>
+                      <td className="cell-pad">
+                        {previewTag[i] === "new" ? <span className="pill pill-completed">New</span>
+                          : previewTag[i] === "update" ? <span className="pill pill-scheduled">Already there</span>
+                          : <span className="pill pill-cancelled">Repeat</span>}
+                      </td>
                       <td className="cell-pad">{String(r.name)}</td>
                       <td className="cell-pad">{String(r.category)}</td>
                       <td className="cell-pad">{String(r.trainer ?? "")}</td>
@@ -270,6 +293,9 @@ export default function TrackerPage() {
                 </tbody>
               </table>
             </div>
+            <p className="small muted" style={{ margin: 0 }}>
+              A training with the same name, section and start date counts as already there. Those rows only refresh its details, so uploading the same sheet twice won't create copies.
+            </p>
             <p className="small muted" style={{ margin: 0 }}>Dates like 17-11-2026 are read as day-month-year. You can fix any cell after importing.</p>
             <div className="row" style={{ justifyContent: "flex-end" }}>
               <button className="btn" onClick={() => setPreview(null)}>Cancel</button>

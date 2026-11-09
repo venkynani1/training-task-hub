@@ -63,6 +63,33 @@ async function ensureSchema() {
     present BOOLEAN NOT NULL,
     PRIMARY KEY (participant_id, day)
   )`;
+  await removeDuplicateTrainings(); // clean up copies left by earlier double imports
+}
+
+/**
+ * Removes repeat copies of a training (same name ignoring case/spacing, same section, same start date;
+ * undated rows are left alone so half-typed rows aren't merged).
+ * Keeps the oldest copy, moves linked tasks onto it, and only deletes copies with no participants or attendance.
+ */
+export async function removeDuplicateTrainings(): Promise<number> {
+  const sql = client();
+  const dupes = (await sql`
+    WITH keyed AS (
+      SELECT id, lower(regexp_replace(trim(name), '\s+', ' ', 'g')) AS n,
+             COALESCE(category, 'Demand Based') AS c, start_date AS sd
+      FROM trainings WHERE start_date IS NOT NULL
+    ), ranked AS (
+      SELECT id, min(id) OVER (PARTITION BY n, c, sd) AS keep_id FROM keyed
+    )
+    SELECT r.id, r.keep_id FROM ranked r
+    WHERE r.id <> r.keep_id
+      AND NOT EXISTS (SELECT 1 FROM participants p WHERE p.training_id = r.id)
+      AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.training_id = r.id)`) as { id: number; keep_id: number }[];
+  for (const d of dupes) {
+    await sql`UPDATE tasks SET training_id = ${d.keep_id} WHERE training_id = ${d.id}`;
+    await sql`DELETE FROM trainings WHERE id = ${d.id}`;
+  }
+  return dupes.length;
 }
 
 /** Tagged-template SQL that makes sure tables exist before the first query. */

@@ -44,7 +44,7 @@ function ruleBased(subject: string, from: string, body: string) {
     training: { name: isTraining ? subject : "", trainer: "", requested_by: from, mode: "", location: "",
       start_date: date, end_date: "", start_time: "", end_time: "" },
     questions: ["What's the deadline for this?", "Anything else to add to this task?"],
-    note: "Read without AI (ANTHROPIC_API_KEY is not set), so check the details.",
+    note: "Read without AI (no GROQ_API_KEY set), so check the details." as string | undefined,
   };
 }
 
@@ -55,24 +55,60 @@ export async function POST(req: Request) {
     const body = s(b.body).slice(0, 15000);
     if (!subject && !body) return fail("The email looks empty", 400);
 
-    if (!process.env.ANTHROPIC_API_KEY) return ok(ruleBased(subject, from, body));
+    const prompt = `Today is ${todayIST()} (India).\n\nFrom: ${from}\nSent: ${date}\nSubject: ${subject}\n\n${body}`;
+    const basic = ruleBased(subject, from, body);
 
-    const client = new Anthropic();
-    const msg = await client.messages.create({
-      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
-      max_tokens: 1500,
-      system: SYSTEM,
-      messages: [{
-        role: "user",
-        content: `Today is ${todayIST()} (India).\n\nFrom: ${from}\nSent: ${date}\nSubject: ${subject}\n\n${body}`,
-      }],
-    });
-    const text = msg.content.map((c) => (c.type === "text" ? c.text : "")).join("");
-    const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+    let text = "";
     try {
-      return ok(JSON.parse(json));
+      if (process.env.GROQ_API_KEY) text = await askGroq(prompt);
+      else if (process.env.ANTHROPIC_API_KEY) text = await askClaude(prompt);
+      else return ok(basic);
+    } catch (e) {
+      console.error("AI extraction failed:", e);
+      return ok({ ...basic, note: `AI reading failed (${short(e)}), so these are basic details — check them.` });
+    }
+
+    try {
+      const parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+      return ok({
+        ...basic,
+        ...parsed,
+        checklist: Array.isArray(parsed.checklist) ? parsed.checklist : [],
+        questions: Array.isArray(parsed.questions) ? parsed.questions : basic.questions,
+        training: { ...basic.training, ...(parsed.training || {}) },
+        note: undefined,
+      });
     } catch {
-      return ok({ ...ruleBased(subject, from, body), note: "Couldn't read the AI reply, so these are basic details." });
+      return ok({ ...basic, note: "Couldn't read the AI reply, so these are basic details." });
     }
   } catch (e) { return fail(e); }
+}
+
+const short = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 120);
+
+async function askGroq(prompt: string): Promise<string> {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    body: JSON.stringify({
+      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      temperature: 0.2,
+      max_tokens: 1500,
+      response_format: { type: "json_object" },
+      messages: [{ role: "system", content: SYSTEM }, { role: "user", content: prompt }],
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || `Groq error ${res.status}`);
+  return data.choices?.[0]?.message?.content || "";
+}
+
+async function askClaude(prompt: string): Promise<string> {
+  const msg = await new Anthropic().messages.create({
+    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
+    max_tokens: 1500,
+    system: SYSTEM,
+    messages: [{ role: "user", content: prompt }],
+  });
+  return msg.content.map((c) => (c.type === "text" ? c.text : "")).join("");
 }

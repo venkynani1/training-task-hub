@@ -14,7 +14,7 @@ A small Next.js app for running corporate trainings day to day:
 3. In **Settings → Environment Variables** add:
    - `GROQ_API_KEY` — free key from console.groq.com/keys (without it, emails are read with simple rules instead of AI)
    - `APP_PASSWORD` — the passcode to open the app
-   - optional `GROQ_MODEL` (default `llama-3.3-70b-versatile`), or `ANTHROPIC_API_KEY` to use Claude instead
+   - optional `GROQ_MODEL` (otherwise it picks the best model your key can use), or `ANTHROPIC_API_KEY` to use Claude instead
 4. Redeploy.
 
 ## Run locally

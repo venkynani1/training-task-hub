@@ -86,21 +86,58 @@ export async function POST(req: Request) {
 
 const short = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 120);
 
-async function askGroq(prompt: string): Promise<string> {
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+const GROQ = "https://api.groq.com/openai/v1";
+const PREFERRED = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
+let workingModel: string | null = null; // remembered while the server instance is warm
+
+async function groqChat(model: string, prompt: string, json: boolean) {
+  const res = await fetch(`${GROQ}/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
     body: JSON.stringify({
-      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      model,
       temperature: 0.2,
-      max_tokens: 1500,
-      response_format: { type: "json_object" },
+      max_tokens: 2000,
+      ...(json ? { response_format: { type: "json_object" } } : {}),
       messages: [{ role: "system", content: SYSTEM }, { role: "user", content: prompt }],
     }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error?.message || `Groq error ${res.status}`);
-  return data.choices?.[0]?.message?.content || "";
+  return { ok: res.ok, status: res.status, msg: String(data?.error?.message || ""), text: data.choices?.[0]?.message?.content || "" };
+}
+
+/** Models this key can use, best first. */
+async function availableModels(): Promise<string[]> {
+  try {
+    const res = await fetch(`${GROQ}/models`, { headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` } });
+    const data = await res.json();
+    const ids: string[] = (data.data || [])
+      .map((m: { id: string }) => m.id)
+      .filter((id: string) => !/whisper|tts|guard|playai|orpheus|distil|compound/i.test(id));
+    const rank = (id: string) => { const i = PREFERRED.indexOf(id); return i < 0 ? 99 : i; };
+    return ids.sort((a, b) => rank(a) - rank(b));
+  } catch { return []; }
+}
+
+async function askGroq(prompt: string): Promise<string> {
+  const tried = new Set<string>();
+  const candidates = [workingModel, process.env.GROQ_MODEL, ...PREFERRED].filter(Boolean) as string[];
+  let lastErr = "";
+  for (let round = 0; round < 2; round++) {
+    for (const model of candidates) {
+      if (tried.has(model)) continue;
+      tried.add(model);
+      let r = await groqChat(model, prompt, true);
+      // some models reject JSON mode — retry plain
+      if (!r.ok && r.status === 400 && /response_format|json/i.test(r.msg)) r = await groqChat(model, prompt, false);
+      if (r.ok && r.text) { workingModel = model; return r.text; }
+      lastErr = r.msg || `Groq error ${r.status}`;
+      // bad key or rate limit won't be fixed by switching models
+      if (r.status === 401 || r.status === 429) throw new Error(lastErr);
+    }
+    if (round === 0) candidates.push(...(await availableModels()));
+  }
+  throw new Error(lastErr || "No Groq model available for this key");
 }
 
 async function askClaude(prompt: string): Promise<string> {

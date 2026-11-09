@@ -7,7 +7,7 @@ import {
 
 type P = { id: number; emp_id: string; name: string; email: string };
 type T = {
-  id: number; name: string; trainer: string; requested_by: string; mode: string; location: string;
+  id: number; name: string; category: string; trainer: string; requested_by: string; mode: string; location: string;
   start_date: string | null; end_date: string | null; start_time: string; end_time: string;
   skip_weekends: boolean; status_override: string; notes: string; status: string;
   days: string[]; participants: P[]; attendance: { participant_id: number; day: string; present: boolean }[];
@@ -147,7 +147,11 @@ export default function TrainingDetail({ params }: { params: Promise<{ id: strin
       <p className="small" style={{ margin: "0 0 8px" }}><Link href="/trainings">← Training tracker</Link></p>
       <div className="pagehead">
         <div>
-          <div className="row"><h1>{t.name}</h1><span className={statusClass(t.status)}>{t.status}</span></div>
+          <div className="row">
+            <h1>{t.name}</h1>
+            <span className={statusClass(t.category)}>{t.category === "Masterclass" ? "Masterclass" : t.category}</span>
+            <span className={statusClass(t.status)}>{t.status}</span>
+          </div>
           <p className="muted" style={{ margin: "4px 0 0" }}>
             {[t.trainer, t.mode, t.location].filter(Boolean).join(" · ") || "No trainer set"} ·{" "}
             {t.start_date ? `${fmtDate(t.start_date)} – ${fmtDate(t.end_date)}` : "Dates not set"}
@@ -165,6 +169,14 @@ export default function TrainingDetail({ params }: { params: Promise<{ id: strin
         <div className="card stack" style={{ marginBottom: 16 }}>
           <div className="grid3">
             <label>Training name<input value={form.name || ""} onChange={(e) => setF("name", e.target.value)} /></label>
+            <label>Section
+              <select value={form.category || "Demand Based"} onChange={(e) => {
+                setF("category", e.target.value);
+                if (e.target.value === "Masterclass") setForm((f) => ({ ...f, category: "Masterclass", start_time: "15:00", end_time: "16:00" }));
+              }}>
+                <option>Demand Based</option><option value="Masterclass">Masterclass</option><option>Ctadel</option>
+              </select>
+            </label>
             <label>Trainer<input value={form.trainer || ""} onChange={(e) => setF("trainer", e.target.value)} /></label>
             <label>Requested by<input value={form.requested_by || ""} onChange={(e) => setF("requested_by", e.target.value)} /></label>
             <label>Start date<input type="date" value={form.start_date || ""} onChange={(e) => setF("start_date", e.target.value)} /></label>
@@ -174,8 +186,10 @@ export default function TrainingDetail({ params }: { params: Promise<{ id: strin
                 <option value=""></option><option>Online</option><option>In-person</option><option>Hybrid</option>
               </select>
             </label>
-            <label>Start time<input type="time" value={form.start_time || ""} onChange={(e) => setF("start_time", e.target.value)} /></label>
-            <label>End time<input type="time" value={form.end_time || ""} onChange={(e) => setF("end_time", e.target.value)} /></label>
+            <label>Start time<input type="time" value={form.start_time || ""} disabled={form.category === "Masterclass"}
+              onChange={(e) => setF("start_time", e.target.value)} /></label>
+            <label>End time<input type="time" value={form.end_time || ""} disabled={form.category === "Masterclass"}
+              onChange={(e) => setF("end_time", e.target.value)} /></label>
             <label>Location / link<input value={form.location || ""} onChange={(e) => setF("location", e.target.value)} /></label>
             <label>Status
               <select value={form.status_override || ""} onChange={(e) => setF("status_override", e.target.value)}>
@@ -188,6 +202,7 @@ export default function TrainingDetail({ params }: { params: Promise<{ id: strin
             Skip Saturdays and Sundays in the attendance sheet
           </label>
           <label>Notes<textarea rows={2} value={form.notes || ""} onChange={(e) => setF("notes", e.target.value)} /></label>
+          {form.category === "Masterclass" && <p className="small muted" style={{ margin: 0 }}>Masterclasses always run 3:00–4:00 PM.</p>}
           <p className="small muted" style={{ margin: 0 }}>Attendance already marked on a day stays saved even if you move the dates.</p>
           <div className="row" style={{ justifyContent: "flex-end" }}>
             <button className="btn primary" onClick={saveDetails}>Save</button>

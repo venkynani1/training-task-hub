@@ -104,6 +104,7 @@ export function mapRows(rows: unknown[][], synonyms: Record<string, string[]>): 
 
 export const TRAINING_COLUMNS: Record<string, string[]> = {
   name: ["trainingname", "training", "coursename", "course", "program", "topic", "title"],
+  category: ["section", "category", "trainingtype", "track", "stream"],
   trainer: ["trainername", "trainer", "faculty", "instructor"],
   requested_by: ["requestedby", "requester", "team", "requestor", "spoc", "account", "bu"],
   mode: ["mode", "delivery", "type"],

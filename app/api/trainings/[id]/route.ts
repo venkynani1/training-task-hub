@@ -1,6 +1,6 @@
 import { q } from "@/lib/db";
 import { ok, fail, s, d } from "@/lib/http";
-import { trainingStatus, trainingDays } from "@/lib/status";
+import { trainingStatus, trainingDays, applyCategoryRules } from "@/lib/status";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -14,6 +14,7 @@ export async function GET(_: Request, { params }: Ctx) {
     const attendance = await q`SELECT participant_id, day::text AS day, present FROM attendance WHERE training_id = ${id}`;
     return ok({
       ...t,
+      category: t.category || "Demand Based",
       status: trainingStatus(t),
       days: trainingDays(t.start_date || "", t.end_date || "", t.skip_weekends),
       participants,
@@ -28,10 +29,10 @@ export async function PATCH(req: Request, { params }: Ctx) {
     const [cur] = await q<Record<string, unknown>>`
       SELECT *, start_date::text AS start_date, end_date::text AS end_date FROM trainings WHERE id = ${id}`;
     if (!cur) return fail("Not found", 404);
-    const m = { ...cur, ...(await req.json()) };
+    const m = applyCategoryRules({ ...cur, ...(await req.json()) });
     if (!s(m.name)) return fail("Training name can't be empty", 400);
     await q`UPDATE trainings SET
-      name = ${s(m.name)}, trainer = ${s(m.trainer)}, requested_by = ${s(m.requested_by)},
+      name = ${s(m.name)}, category = ${m.category}, trainer = ${s(m.trainer)}, requested_by = ${s(m.requested_by)},
       mode = ${s(m.mode)}, location = ${s(m.location)},
       start_date = ${d(m.start_date)}, end_date = ${d(m.end_date)},
       start_time = ${s(m.start_time)}, end_time = ${s(m.end_time)},

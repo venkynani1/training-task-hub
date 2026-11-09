@@ -20,11 +20,21 @@ export default function EmailReview({ email, draft, onClose, onSaved }: {
   const [answers, setAnswers] = useState<string[]>((draft.questions || []).map(() => ""));
   const [extra, setExtra] = useState("");
   const [addTraining, setAddTraining] = useState(!!draft.is_training);
-  const [tr, setTr] = useState<Record<string, string>>({ ...(draft.training || {}) });
+  const [tr, setTr] = useState<Record<string, string>>(() => {
+    const t: Record<string, string> = { ...(draft.training || {}) };
+    t.category = /master/i.test(t.category || "") ? "Masterclass" : /ctadel/i.test(t.category || "") ? "Ctadel" : "Demand Based";
+    if (t.category === "Masterclass") { t.start_time = "15:00"; t.end_time = "16:00"; }
+    return t;
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  const setT = (k: string, v: string) => setTr((p) => ({ ...p, [k]: v }));
+  const setT = (k: string, v: string) => setTr((p) => {
+    const n = { ...p, [k]: v };
+    if (n.category === "Masterclass") { n.start_time = "15:00"; n.end_time = "16:00"; }
+    return n;
+  });
+  const isMC = tr.category === "Masterclass";
 
   async function save() {
     setBusy(true); setErr("");
@@ -102,7 +112,14 @@ export default function EmailReview({ email, draft, onClose, onSaved }: {
         </label>
         {addTraining && (
           <div className="card stack" style={{ background: "var(--surface-2)", boxShadow: "none" }}>
-            <label>Training name<input value={tr.name || ""} onChange={(e) => setT("name", e.target.value)} /></label>
+            <div className="grid2">
+              <label>Training name<input value={tr.name || ""} onChange={(e) => setT("name", e.target.value)} /></label>
+              <label>Section
+                <select value={tr.category} onChange={(e) => setT("category", e.target.value)}>
+                  <option>Demand Based</option><option value="Masterclass">Masterclass (3–4 PM)</option><option>Ctadel</option>
+                </select>
+              </label>
+            </div>
             <div className="grid3">
               <label>Trainer<input value={tr.trainer || ""} onChange={(e) => setT("trainer", e.target.value)} /></label>
               <label>Requested by<input value={tr.requested_by || ""} onChange={(e) => setT("requested_by", e.target.value)} /></label>
@@ -114,8 +131,8 @@ export default function EmailReview({ email, draft, onClose, onSaved }: {
               <label>Start date<input type="date" value={tr.start_date || ""} onChange={(e) => setT("start_date", e.target.value)} /></label>
               <label>End date<input type="date" value={tr.end_date || ""} onChange={(e) => setT("end_date", e.target.value)} /></label>
               <label>Location / link<input value={tr.location || ""} onChange={(e) => setT("location", e.target.value)} /></label>
-              <label>Start time<input type="time" value={tr.start_time || ""} onChange={(e) => setT("start_time", e.target.value)} /></label>
-              <label>End time<input type="time" value={tr.end_time || ""} onChange={(e) => setT("end_time", e.target.value)} /></label>
+              <label>Start time<input type="time" value={tr.start_time || ""} disabled={isMC} onChange={(e) => setT("start_time", e.target.value)} /></label>
+              <label>End time<input type="time" value={tr.end_time || ""} disabled={isMC} onChange={(e) => setT("end_time", e.target.value)} /></label>
             </div>
             <p className="small muted" style={{ margin: 0 }}>Leave dates empty if not fixed yet — you can fill them in the tracker later.</p>
           </div>

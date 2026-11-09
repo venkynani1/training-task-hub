@@ -4,10 +4,10 @@ import Link from "next/link";
 import {
   api, mapRows, readSpreadsheet, toISODate, toTime, TRAINING_COLUMNS, downloadCSV, statusClass, fmtDate,
 } from "@/lib/client";
-import { trainingStatus } from "@/lib/status";
+import { trainingStatus, applyCategoryRules, MASTERCLASS_TIME } from "@/lib/status";
 
 type Training = {
-  id: number; name: string; trainer: string; requested_by: string; mode: string; location: string;
+  id: number; name: string; category: string; trainer: string; requested_by: string; mode: string; location: string;
   start_date: string | null; end_date: string | null; start_time: string; end_time: string;
   skip_weekends: boolean; status_override: string; notes: string; status: string;
   participants: number; days_marked: number; total_days: number;
@@ -15,6 +15,7 @@ type Training = {
 
 const FIELDS: { key: keyof Training; label: string; type?: string; w: string; options?: string[] }[] = [
   { key: "name", label: "Training name", w: "w-name" },
+  { key: "category", label: "Section", w: "w-mid", options: ["Demand Based", "Masterclass", "Ctadel"] },
   { key: "trainer", label: "Trainer", w: "w-mid" },
   { key: "requested_by", label: "Requested by", w: "w-mid" },
   { key: "mode", label: "Mode", w: "w-sm", options: ["", "Online", "In-person", "Hybrid"] },
@@ -25,12 +26,24 @@ const FIELDS: { key: keyof Training; label: string; type?: string; w: string; op
   { key: "end_time", label: "To", type: "time", w: "w-sm" },
 ];
 const FILTERS = ["All", "Scheduled", "Ongoing", "Completed", "On Hold", "Cancelled"];
+const SECTIONS = [
+  { key: "All", label: "All trainings" },
+  { key: "Demand Based", label: "Demand Based" },
+  { key: "Masterclass", label: "Masterclasses" },
+  { key: "Ctadel", label: "Ctadel" },
+];
+const isFixedTime = (t: { category?: string }, key: string) =>
+  t.category === "Masterclass" && (key === "start_time" || key === "end_time");
 
 export default function TrackerPage() {
   const [rows, setRows] = useState<Training[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [filter, setFilter] = useState("All");
+  const [section, setSection] = useState("All");
+  useEffect(() => { try { const v = localStorage.getItem("tth-section"); if (v) setSection(v); } catch {} }, []);
+  const pickSection = (v: string) => { setSection(v); try { localStorage.setItem("tth-section", v); } catch {} };
+  const newCategory = section === "All" ? "Demand Based" : section;
   const [query, setQuery] = useState("");
   const [draftName, setDraftName] = useState("");
   const [preview, setPreview] = useState<Record<string, unknown>[] | null>(null);
@@ -50,7 +63,8 @@ export default function TrackerPage() {
     const change: Partial<Training> = { [key]: value };
     // keep end date sane when the start moves past it
     if (key === "start_date" && value && (!t.end_date || t.end_date < String(value))) change.end_date = String(value);
-    const next = { ...t, ...change };
+    if (key === "category" && value === "Masterclass") Object.assign(change, MASTERCLASS_TIME);
+    const next = applyCategoryRules({ ...t, ...change });
     next.status = trainingStatus(next);
     setRows((all) => all.map((x) => (x.id === t.id ? next : x)));
     try { await api(`/api/trainings/${t.id}`, "PATCH", change); }
@@ -59,7 +73,7 @@ export default function TrackerPage() {
 
   async function addRow() {
     if (!draftName.trim()) return;
-    await api("/api/trainings", "POST", { name: draftName.trim() });
+    await api("/api/trainings", "POST", { name: draftName.trim(), category: newCategory });
     setDraftName(""); load();
   }
 
@@ -80,7 +94,9 @@ export default function TrackerPage() {
           end_date: toISODate(r.end_date),
           start_time: toTime(r.start_time),
           end_time: toTime(r.end_time),
+          category: r.category ? String(r.category) : newCategory,
         }))
+        .map((r) => applyCategoryRules(r))
         .filter((r) => r.name);
       if (!mapped.length) {
         alert("Couldn't find a header row with a Training Name column. Download the template to see the expected columns.");
@@ -100,16 +116,17 @@ export default function TrackerPage() {
   }
 
   function exportSheet() {
-    downloadCSV("training-tracker.csv", [
-      ["Training Name", "Trainer", "Requested By", "Mode", "Location", "Start Date", "End Date",
+    downloadCSV(`training-tracker${section === "All" ? "" : "-" + section.toLowerCase().replace(/\s+/g, "-")}.csv`, [
+      ["Training Name", "Section", "Trainer", "Requested By", "Mode", "Location", "Start Date", "End Date",
         "Start Time", "End Time", "Status", "Participants", "Days Marked", "Total Days", "Notes"],
-      ...rows.map((t) => [t.name, t.trainer, t.requested_by, t.mode, t.location, t.start_date || "",
+      ...inSection.map((t) => [t.name, t.category, t.trainer, t.requested_by, t.mode, t.location, t.start_date || "",
         t.end_date || "", t.start_time, t.end_time, t.status, t.participants, t.days_marked, t.total_days, t.notes]),
     ]);
   }
 
-  const counts = Object.fromEntries(FILTERS.map((f) => [f, f === "All" ? rows.length : rows.filter((r) => r.status === f).length]));
-  const shown = rows.filter((r) =>
+  const inSection = rows.filter((r) => section === "All" || r.category === section);
+  const counts = Object.fromEntries(FILTERS.map((f) => [f, f === "All" ? inSection.length : inSection.filter((r) => r.status === f).length]));
+  const shown = inSection.filter((r) =>
     (filter === "All" || r.status === filter) &&
     (!query || `${r.name} ${r.trainer} ${r.requested_by}`.toLowerCase().includes(query.toLowerCase())));
 
@@ -124,8 +141,10 @@ export default function TrackerPage() {
         </div>
         <div className="row">
           <button className="btn" onClick={() => downloadCSV("training-schedule-template.csv", [
-            ["Training Name", "Trainer", "Requested By", "Mode", "Location", "Start Date", "End Date", "Start Time", "End Time", "Notes"],
-            ["Java Full Stack – Batch 3", "Ravi Kumar", "Banking Delivery", "Online", "Teams", "17-11-2026", "28-11-2026", "10:00", "13:00", ""],
+            ["Training Name", "Section", "Trainer", "Requested By", "Mode", "Location", "Start Date", "End Date", "Start Time", "End Time", "Notes"],
+            ["Java Full Stack – Batch 3", "Demand Based", "Ravi Kumar", "Banking Delivery", "Online", "Teams", "17-11-2026", "28-11-2026", "10:00", "13:00", ""],
+            ["GenAI for Testers", "Masterclass", "Anu Priya", "", "Online", "Teams", "20-11-2026", "20-11-2026", "15:00", "16:00", "Masterclasses are always 3–4 PM"],
+            ["Ctadel Cohort 2 – Week 1", "Ctadel", "", "", "In-person", "Chennai", "24-11-2026", "28-11-2026", "", "", ""],
           ])}>Template</button>
           <button className="btn" onClick={exportSheet}>Export</button>
           <button className="btn primary" onClick={() => fileRef.current?.click()}>Import Excel schedule</button>
@@ -135,6 +154,19 @@ export default function TrackerPage() {
       </div>
 
       {err && <div className="card error" style={{ marginBottom: 12 }}>{err}</div>}
+
+      <div className="segments" role="tablist">
+        {SECTIONS.map((sec) => (
+          <button key={sec.key} role="tab" aria-selected={section === sec.key}
+            className={section === sec.key ? "segment active" : "segment"} onClick={() => pickSection(sec.key)}>
+            {sec.label}
+            <span className="segment-count">{sec.key === "All" ? rows.length : rows.filter((r) => r.category === sec.key).length}</span>
+          </button>
+        ))}
+      </div>
+      {section === "Masterclass" && (
+        <p className="small muted" style={{ margin: "-4px 0 10px" }}>Masterclasses always run 3:00–4:00 PM — times are set automatically.</p>
+      )}
 
       <div className="row" style={{ marginBottom: 10 }}>
         <div className="tabs" style={{ flex: 1, marginBottom: 0 }}>
@@ -167,8 +199,10 @@ export default function TrackerPage() {
                 <td className="sticky rownum">{i + 1}</td>
                 {FIELDS.map((f) => (
                   <td key={f.key}>
-                    {f.options ? (
-                      <select defaultValue={String(t[f.key] ?? "")} onChange={(e) => save(t, f.key, e.target.value)}>
+                    {isFixedTime(t, f.key) ? (
+                      <span className="cell-pad fixed" title="Masterclasses always run 3–4 PM">{f.key === "start_time" ? "3:00 PM" : "4:00 PM"}</span>
+                    ) : f.options ? (
+                      <select key={`${t.id}-${f.key}-${t[f.key]}`} defaultValue={String(t[f.key] ?? "")} onChange={(e) => save(t, f.key, e.target.value)}>
                         {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     ) : (
@@ -201,7 +235,7 @@ export default function TrackerPage() {
             <tr>
               <td className="sticky rownum">+</td>
               <td colSpan={FIELDS.length + 5}>
-                <input placeholder="Type a new training name and press Enter…" value={draftName}
+                <input placeholder={`Type a new ${section === "Masterclass" ? "masterclass" : section === "Ctadel" ? "Ctadel training" : "training"} name and press Enter…`} value={draftName}
                   onChange={(e) => setDraftName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addRow()}
                   onBlur={addRow} />
               </td>
@@ -215,15 +249,17 @@ export default function TrackerPage() {
           <div className="modal stack" style={{ maxWidth: 900 }}>
             <div className="modal-head">
               <h2 style={{ margin: 0 }}>Import {preview.length} trainings?</h2>
+              <span className="small muted">Rows without a Section column go to {newCategory}.</span>
               <button className="btn ghost" onClick={() => setPreview(null)}>✕</button>
             </div>
             <div className="sheet-wrap" style={{ maxHeight: 360 }}>
               <table className="sheet">
-                <thead><tr><th>Training</th><th>Trainer</th><th>Start</th><th>End</th><th>Time</th><th>Status</th></tr></thead>
+                <thead><tr><th>Training</th><th>Section</th><th>Trainer</th><th>Start</th><th>End</th><th>Time</th><th>Status</th></tr></thead>
                 <tbody>
                   {preview.map((r, i) => (
                     <tr key={i}>
                       <td className="cell-pad">{String(r.name)}</td>
+                      <td className="cell-pad">{String(r.category)}</td>
                       <td className="cell-pad">{String(r.trainer ?? "")}</td>
                       <td className="cell-pad">{fmtDate(r.start_date as string)}</td>
                       <td className="cell-pad">{fmtDate((r.end_date || r.start_date) as string)}</td>

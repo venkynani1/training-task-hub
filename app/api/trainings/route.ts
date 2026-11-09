@@ -1,13 +1,13 @@
 import { q } from "@/lib/db";
 import { ok, fail, s, d } from "@/lib/http";
-import { trainingStatus, trainingDays, todayIST } from "@/lib/status";
+import { trainingStatus, trainingDays, todayIST, applyCategoryRules } from "@/lib/status";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     const rows = await q<Record<string, any>>`
-      SELECT t.id, t.name, t.trainer, t.requested_by, t.mode, t.location,
+      SELECT t.id, t.name, COALESCE(t.category, 'Demand Based') AS category, t.trainer, t.requested_by, t.mode, t.location,
              t.start_date::text AS start_date, t.end_date::text AS end_date,
              t.start_time, t.end_time, t.skip_weekends, t.status_override, t.notes,
              (SELECT count(*)::int FROM participants p WHERE p.training_id = t.id) AS participants,
@@ -33,13 +33,14 @@ export async function POST(req: Request) {
     const b = await req.json();
     const list: Record<string, unknown>[] = Array.isArray(b.rows) ? b.rows : [b];
     const ids: number[] = [];
-    for (const r of list) {
-      if (!s(r.name)) continue;
+    for (const raw of list as Record<string, any>[]) {
+      if (!s(raw.name)) continue;
+      const r: Record<string, any> = applyCategoryRules({ ...raw, category: raw.category || b.category });
       const start = d(r.start_date);
       const [row] = await q<{ id: number }>`
-        INSERT INTO trainings (name, trainer, requested_by, mode, location, start_date, end_date,
+        INSERT INTO trainings (name, category, trainer, requested_by, mode, location, start_date, end_date,
                                start_time, end_time, skip_weekends, status_override, notes)
-        VALUES (${s(r.name)}, ${s(r.trainer)}, ${s(r.requested_by)}, ${s(r.mode)}, ${s(r.location)},
+        VALUES (${s(r.name)}, ${r.category}, ${s(r.trainer)}, ${s(r.requested_by)}, ${s(r.mode)}, ${s(r.location)},
                 ${start}, ${d(r.end_date) || start}, ${s(r.start_time)}, ${s(r.end_time)},
                 ${r.skip_weekends === false ? false : true}, ${s(r.status_override)}, ${s(r.notes)})
         RETURNING id`;

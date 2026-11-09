@@ -1,3 +1,20 @@
+export const CATEGORIES = ["Demand Based", "Masterclass", "Ctadel"] as const;
+export const DEFAULT_CATEGORY = "Demand Based";
+export const MASTERCLASS_TIME = { start_time: "15:00", end_time: "16:00" };
+
+export function normCategory(v: unknown): string {
+  const t = String(v ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  if (t.startsWith("master")) return "Masterclass";
+  if (t.includes("ctadel")) return "Ctadel";
+  return DEFAULT_CATEGORY;
+}
+
+/** Masterclasses always run 3–4 PM. */
+export function applyCategoryRules<T extends Record<string, any>>(r: T): T & { category: string } {
+  const category = normCategory(r.category);
+  return category === "Masterclass" ? { ...r, category, ...MASTERCLASS_TIME } : { ...r, category };
+}
+
 export const STATUSES = ["Scheduled", "Ongoing", "Completed", "On Hold", "Cancelled"] as const;
 export const OVERRIDES = ["", "On Hold", "Cancelled"] as const;
 

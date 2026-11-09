@@ -30,6 +30,9 @@ async function ensureSchema() {
     notes TEXT DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT now()
   )`;
+  await sql`ALTER TABLE trainings ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Demand Based'`;
+  await sql`UPDATE trainings SET start_time = '15:00', end_time = '16:00'
+            WHERE category = 'Masterclass' AND (start_time <> '15:00' OR end_time <> '16:00')`;
   await sql`CREATE TABLE IF NOT EXISTS tasks (
     id SERIAL PRIMARY KEY,
     title TEXT NOT NULL,

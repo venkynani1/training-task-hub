@@ -135,9 +135,9 @@ export default function TrackerPage() {
   function exportSheet() {
     downloadCSV(`training-tracker${section === "All" ? "" : "-" + section.toLowerCase().replace(/\s+/g, "-")}.csv`, [
       ["Training Name", "Section", "Trainer", "Requested By", "Mode", "Location", "Start Date", "End Date",
-        "Start Time", "End Time", "Status", "Participants", "Days Marked", "Total Days", "Notes"],
+        "Start Time", "End Time", "Status", "Notes"],
       ...inSection.map((t) => [t.name, t.category, t.trainer, t.requested_by, t.mode, t.location, t.start_date || "",
-        t.end_date || "", t.start_time, t.end_time, t.status, t.participants, t.days_marked, t.total_days, t.notes]),
+        t.end_date || "", t.start_time, t.end_time, t.status, t.notes]),
     ]);
   }
 
@@ -218,14 +218,12 @@ export default function TrackerPage() {
               <th className="sticky">#</th>
               {FIELDS.map((f) => <th key={f.key} className={f.w}>{f.label}</th>)}
               <th className="w-mid">Status</th>
-              <th className="w-xs">People</th>
-              <th className="w-sm">Attendance</th>
               <th className="w-mid">Notes</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={FIELDS.length + 6} className="empty"><span className="spin" /></td></tr>}
+            {loading && <tr><td colSpan={FIELDS.length + 4} className="empty"><span className="spin" /></td></tr>}
             {shown.map((t, i) => (
               <tr key={t.id}>
                 <td className="sticky rownum">{i + 1}</td>
@@ -256,17 +254,18 @@ export default function TrackerPage() {
                     </select>
                   </div>
                 </td>
-                <td className="cell-pad" style={{ textAlign: "center" }}>{t.participants}</td>
-                <td className="cell-pad">
-                  <Link href={`/trainings/${t.id}`}>{t.total_days ? `${t.days_marked}/${t.total_days} days` : "Open"}</Link>
-                </td>
                 <td><input key={`${t.id}-notes-${t.notes}`} defaultValue={t.notes} onBlur={(e) => save(t, "notes", e.target.value)} /></td>
-                <td className="cell-pad"><button className="btn ghost sm danger" onClick={() => remove(t)} aria-label="Delete">✕</button></td>
+                <td className="cell-pad">
+                  <div className="row" style={{ flexWrap: "nowrap", gap: 2 }}>
+                    <Link href={`/trainings/${t.id}`} className="btn ghost sm" title="Open training">Open</Link>
+                    <button className="btn ghost sm danger" onClick={() => remove(t)} aria-label="Delete">✕</button>
+                  </div>
+                </td>
               </tr>
             ))}
             <tr>
               <td className="sticky rownum">+</td>
-              <td colSpan={FIELDS.length + 5}>
+              <td colSpan={FIELDS.length + 3}>
                 <input placeholder={`Type a new ${section === "Masterclass" ? "masterclass" : section === "Ctadel" ? "Ctadel training" : "training"} name and press Enter…`} value={draftName}
                   onChange={(e) => setDraftName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addRow()}
                   onBlur={addRow} />

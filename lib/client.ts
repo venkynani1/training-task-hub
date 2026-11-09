@@ -154,3 +154,58 @@ export function downloadCSV(name: string, rows: (string | number)[][]) {
 }
 
 export const statusClass = (st: string) => "pill pill-" + st.toLowerCase().replace(/\s+/g, "-");
+
+/** Spreadsheet cell → plain text the AI can read (dates as YYYY-MM-DD, Excel times as HH:MM). */
+export function cellText(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date && !isNaN(+v)) {
+    const iso = v.toISOString();
+    if (iso.startsWith("1899-12-3") || iso.startsWith("1900-01-0")) return iso.slice(11, 16); // time-only cell
+    return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
+  }
+  if (typeof v === "number" && v > 0 && v < 1) return toTime(v);
+  return String(v).trim();
+}
+
+const CHUNK = 25;
+const CONTEXT_ROWS = 10;
+
+/**
+ * Reads a sheet with the AI, chunk by chunk. Any chunk the AI can't read falls back to header matching,
+ * so an import never fails just because the AI is down.
+ */
+export async function readSheetSmart(
+  rows: unknown[][],
+  opts: { kind: "trainings" | "participants"; section?: string; fileName?: string; onProgress?: (msg: string) => void },
+): Promise<{ items: Record<string, unknown>[]; mode: "ai" | "mixed" | "basic"; error?: string }> {
+  const text = rows.map((r) => (r || []).map(cellText));
+  while (text.length && !text[text.length - 1].some((c) => c)) text.pop();
+  const synonyms = opts.kind === "participants" ? PARTICIPANT_COLUMNS : TRAINING_COLUMNS;
+  const context = text.slice(0, CONTEXT_ROWS);
+  const items: Record<string, unknown>[] = [];
+  let aiChunks = 0, basicChunks = 0, error = "";
+
+  for (let start = 0; start < text.length; start += CHUNK) {
+    const chunk = text.slice(start, start + CHUNK);
+    opts.onProgress?.(`Reading rows ${start + 1}–${start + chunk.length} of ${text.length} with AI…`);
+    let got: Record<string, unknown>[] | null = null;
+    try {
+      const r = await api<{ ai: boolean; items: Record<string, unknown>[]; error?: string }>("/api/read-sheet", "POST", {
+        kind: opts.kind, section: opts.section, fileName: opts.fileName,
+        start: start + 1, rows: chunk, context: start === 0 ? [] : context,
+      });
+      if (r.ai) got = r.items;
+      else if (r.error) error = r.error;
+    } catch (e) { error = (e as Error).message; }
+
+    if (got) { items.push(...got); aiChunks++; }
+    else {
+      // fallback: header matching on context + this chunk
+      const mapped = mapRows(start === 0 ? chunk : [...context, ...chunk], synonyms);
+      const filled = chunk.filter((r) => r.some((c) => c !== "")).length;
+      const fromChunk = start === 0 ? mapped : mapped.slice(Math.max(0, mapped.length - filled));
+      items.push(...fromChunk); basicChunks++;
+    }
+  }
+  return { items, mode: basicChunks === 0 ? "ai" : aiChunks === 0 ? "basic" : "mixed", error };
+}

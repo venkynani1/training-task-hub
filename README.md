@@ -27,6 +27,8 @@ npm run dev
 
 ## Excel schedule format
 
+Sheets are read by the AI (Groq) first: it works out which column is which, splits cells like `17–28 Nov` or `10 AM – 1 PM`, picks the section, and puts extra columns (PR number, batch size…) into Notes. You review everything in a preview before it's saved. If the AI is unavailable, the app falls back to matching the column names below.
+
 The importer finds the header row on its own and matches common names, e.g. `Training Name / Course`, `Trainer / Faculty`, `Requested By / Team`, `Mode`, `Location / Venue`, `Start Date / From Date`, `End Date / To Date`, `Start Time`, `End Time`, `Notes / Remarks`. Dates can be real Excel dates or text like `17-11-2026` (day first) or `17 Nov 2026`. Use **Template** on the tracker page for a sample.
 
 Participant sheets need a `Name` column; `Emp ID` and `Email` are optional.

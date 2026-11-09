@@ -2,7 +2,7 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  api, mapRows, readSpreadsheet, PARTICIPANT_COLUMNS, downloadCSV, fmtDate, todayIST, statusClass,
+  api, readSpreadsheet, readSheetSmart, downloadCSV, fmtDate, todayIST, statusClass,
 } from "@/lib/client";
 
 type P = { id: number; emp_id: string; name: string; email: string };
@@ -29,6 +29,7 @@ export default function TrainingDetail({ params }: { params: Promise<{ id: strin
   const [addOpen, setAddOpen] = useState(false);
   const [pasteList, setPasteList] = useState("");
   const [toast, setToast] = useState("");
+  const [reading, setReading] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const todayRef = useRef<HTMLTableCellElement>(null);
   const today = todayIST();
@@ -83,8 +84,15 @@ export default function TrainingDetail({ params }: { params: Promise<{ id: strin
   }
 
   async function fromFile(file: File) {
-    try { addPeople(mapRows(await readSpreadsheet(file), PARTICIPANT_COLUMNS)); }
-    catch (e) { alert("Couldn't read that file: " + (e as Error).message); }
+    setReading("Opening sheet…");
+    try {
+      const r = await readSheetSmart(await readSpreadsheet(file), {
+        kind: "participants", fileName: file.name, onProgress: setReading,
+      });
+      if (r.mode !== "ai" && r.error) flash("AI unavailable — matched columns by header instead");
+      await addPeople(r.items);
+    } catch (e) { alert("Couldn't read that file: " + (e as Error).message); }
+    finally { setReading(""); }
   }
 
   function fromPaste() {
@@ -213,7 +221,9 @@ export default function TrainingDetail({ params }: { params: Promise<{ id: strin
         <h2 style={{ margin: 0 }}>Attendance <span className="muted">· {t.participants.length} people · {t.days.length} days</span></h2>
         <span className="spacer" />
         <button className="btn sm" onClick={() => setAddOpen((v) => !v)}>+ Participants</button>
-        <button className="btn sm" onClick={() => fileRef.current?.click()}>Import from Excel</button>
+        <button className="btn sm" disabled={!!reading} onClick={() => fileRef.current?.click()}>
+          {reading ? <><span className="spin" /> {reading}</> : "Import from Excel"}
+        </button>
         <input ref={fileRef} type="file" accept=".xlsx,.csv" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) fromFile(f); e.target.value = ""; }} />
       </div>

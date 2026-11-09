@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  api, mapRows, readSpreadsheet, toISODate, toTime, TRAINING_COLUMNS, downloadCSV, statusClass, fmtDate,
+  api, readSpreadsheet, readSheetSmart, toISODate, toTime, downloadCSV, statusClass, fmtDate,
 } from "@/lib/client";
 import { trainingStatus, applyCategoryRules, MASTERCLASS_TIME, trainingKey } from "@/lib/status";
 
@@ -48,6 +48,8 @@ export default function TrackerPage() {
   const [draftName, setDraftName] = useState("");
   const [preview, setPreview] = useState<Record<string, unknown>[] | null>(null);
   const [importing, setImporting] = useState(false);
+  const [reading, setReading] = useState("");
+  const [previewMode, setPreviewMode] = useState<{ mode: string; error?: string }>({ mode: "ai" });
   const [toast, setToast] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -84,9 +86,13 @@ export default function TrackerPage() {
   }
 
   async function pickFile(file: File) {
+    setReading("Opening sheet…");
     try {
       const data = await readSpreadsheet(file);
-      const mapped = mapRows(data, TRAINING_COLUMNS)
+      const result = await readSheetSmart(data, {
+        kind: "trainings", section: newCategory, fileName: file.name, onProgress: setReading,
+      });
+      const mapped = result.items
         .map((r) => ({
           ...r,
           name: String(r.name ?? "").trim(),
@@ -95,15 +101,23 @@ export default function TrackerPage() {
           start_time: toTime(r.start_time),
           end_time: toTime(r.end_time),
           category: r.category ? String(r.category) : newCategory,
+          status_override: /hold|postpon/i.test(String(r.status_override ?? "")) ? "On Hold"
+            : /cancel|drop/i.test(String(r.status_override ?? "")) ? "Cancelled" : "",
+          ...Object.fromEntries(["trainer", "requested_by", "mode", "location", "notes"]
+            .map((k) => [k, String(r[k] ?? "").trim()])),
         }))
         .map((r) => applyCategoryRules(r))
         .filter((r) => r.name);
       if (!mapped.length) {
-        alert("Couldn't find a header row with a Training Name column. Download the template to see the expected columns.");
+        alert(result.mode === "basic"
+          ? `Couldn't find any trainings in that sheet${result.error ? ` (AI unavailable: ${result.error})` : ""}. Download the template to see the expected columns.`
+          : "The AI didn't find any trainings in that sheet.");
         return;
       }
+      setPreviewMode(result);
       setPreview(mapped);
     } catch (e) { alert("Couldn't read that file: " + (e as Error).message); }
+    finally { setReading(""); }
   }
 
   async function doImport() {
@@ -162,13 +176,16 @@ export default function TrackerPage() {
             ["Ctadel Cohort 2 – Week 1", "Ctadel", "", "", "In-person", "Chennai", "24-11-2026", "28-11-2026", "", "", ""],
           ])}>Template</button>
           <button className="btn" onClick={exportSheet}>Export</button>
-          <button className="btn primary" onClick={() => fileRef.current?.click()}>Import Excel schedule</button>
+          <button className="btn primary" disabled={!!reading} onClick={() => fileRef.current?.click()}>
+            {reading ? <><span className="spin" /> Reading…</> : "Import Excel schedule"}
+          </button>
           <input ref={fileRef} type="file" accept=".xlsx,.csv" hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) pickFile(f); e.target.value = ""; }} />
         </div>
       </div>
 
       {err && <div className="card error" style={{ marginBottom: 12 }}>{err}</div>}
+      {reading && <div className="note" style={{ marginBottom: 12 }}><span className="spin" /> {reading}</div>}
 
       <div className="segments" role="tablist">
         {SECTIONS.map((sec) => (
@@ -272,7 +289,7 @@ export default function TrackerPage() {
             </div>
             <div className="sheet-wrap" style={{ maxHeight: 360 }}>
               <table className="sheet">
-                <thead><tr><th></th><th>Training</th><th>Section</th><th>Trainer</th><th>Start</th><th>End</th><th>Time</th><th>Status</th></tr></thead>
+                <thead><tr><th></th><th>Training</th><th>Section</th><th>Trainer</th><th>Start</th><th>End</th><th>Time</th><th>Status</th><th>Requested by</th><th>Location</th><th>Notes</th></tr></thead>
                 <tbody>
                   {preview.map((r, i) => (
                     <tr key={i} style={previewTag[i] === "new" ? undefined : { opacity: .6 }}>
@@ -288,11 +305,21 @@ export default function TrackerPage() {
                       <td className="cell-pad">{fmtDate((r.end_date || r.start_date) as string)}</td>
                       <td className="cell-pad">{[r.start_time, r.end_time].filter(Boolean).join("–")}</td>
                       <td className="cell-pad"><span className={statusClass(trainingStatus(r as any))}>{trainingStatus(r as any)}</span></td>
+                      <td className="cell-pad">{String(r.requested_by ?? "")}</td>
+                      <td className="cell-pad">{String(r.location ?? "")}</td>
+                      <td className="cell-pad small muted" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }} title={String(r.notes ?? "")}>{String(r.notes ?? "")}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {previewMode.mode === "ai" && <div className="note">✦ Read with AI — check the dates and sections below before importing.</div>}
+            {previewMode.mode !== "ai" && (
+              <div className="note" style={{ background: "var(--warn-soft)", color: "var(--warn)" }}>
+                {previewMode.mode === "basic" ? "AI reading wasn't available" : "AI couldn't read part of the sheet"}
+                {previewMode.error ? ` (${previewMode.error})` : ""}, so {previewMode.mode === "basic" ? "columns were" : "those rows were"} matched by header names instead. Check the rows below.
+              </div>
+            )}
             <p className="small muted" style={{ margin: 0 }}>
               A training with the same name, section and start date counts as already there. Those rows only refresh its details, so uploading the same sheet twice won't create copies.
             </p>
